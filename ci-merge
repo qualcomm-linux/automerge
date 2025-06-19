@@ -677,7 +677,8 @@ while read LINE; do
     if echo "$MERGE_OUTPUT" | grep -q "Already up to date." ; then
         echo "Nothing to merge: Already up to date."
     elif [ $is_conflict != 1 ]; then
-        echo "Merge successful : $REMOTE_NAME : $branch_tip"
+        num_commits=$(git log --oneline --no-merges $TAG..$MERGER | wc -l)
+        echo "Merge successful : $REMOTE_NAME : $branch_tip : $num_commits"
         MERGED=$((MERGED+1))
     else
         echo "Merge conflict : $REMOTE_NAME : $branch_tip"
