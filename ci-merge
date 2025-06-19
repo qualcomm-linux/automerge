@@ -111,6 +111,8 @@ RERERE_CACHE=""
 
 RERERE_CACHE_DIR=""
 
+BYPASS=0
+
 # Global variable to test if a change occured during the last merge
 # or not. If one branch is added, deleted or updated, this variable
 # will be different from zero and will lead to the merge operation
@@ -142,6 +144,7 @@ Help() {
     echo "	 -f|--config <name>	: Config file listing branches to be merged [$CONFIG]"
     echo "	 -n|--interactive	: Whether to run the tool interactively [$INTERACTIVE]"
     echo "	 -y|--force		: Whether to force merging the branches [$FORCE]"
+    echo "	 -p|--pass		: Whether to bypass conflicting branch [$BYPASS]"
 
     echo
 }
@@ -152,8 +155,8 @@ Help() {
 #
 options_setup() {
 
-    SHORTOPT="hnl:r:b:i:t:c:f:y"
-    LONGOPT="help,interactive,local:,remote:,baseline:,integ:,track:,cache:,config:,force"
+    SHORTOPT="hnl:r:b:i:t:c:f:y:p"
+    LONGOPT="help,interactive,local:,remote:,baseline:,integ:,track:,cache:,config:,force:,pass"
 
     OPTS=$(getopt -o $SHORTOPT -l $LONGOPT -- "$@")
 
@@ -217,6 +220,10 @@ options_setup() {
 
 	    --config|-f)
 		CONFIG=$1
+		;;
+
+        --pass|-p)
+		BYPASS=1
 		;;
 	    --)
 		break
@@ -618,7 +625,6 @@ echo "Create a new integration branch based on $TAG"
 git checkout -b $INTEG_BRANCH $TAG
 
 echo "Merging topic branches..."
-
 MERGED=0
 
 # Dup STDIN onto fd 3
@@ -626,6 +632,7 @@ exec 3<&0
 
 while read LINE; do
 
+    is_conflict=0
     echo $LINE | egrep -q '(^#|^\s*$|^\s*\t*#)' && continue
     REMOTE_NAME=$(echo $LINE | awk '{ print $1 }')
     REMOTE_URL=$(echo $LINE | awk '{print $2}')
@@ -644,8 +651,8 @@ while read LINE; do
 
     echo "------------------------------------------"
     echo " ** Merging topic branch: $MERGER"
-
-    git merge -q --no-ff --no-edit -m "Merge remote-tracking branch $REMOTE_NAME into $INTEG_BRANCH" $MERGER
+    branch_tip=$(git rev-parse $MERGER)
+    MERGE_OUTPUT=$(git merge --no-ff --no-edit -m "Merge remote-tracking branch $REMOTE_NAME into $INTEG_BRANCH" $MERGER)
     if [ $? -ne 0 ]; then
 	if [ $INTERACTIVE -eq 0 ]; then
             # try to commit, may be resolved by rerere
@@ -654,7 +661,11 @@ while read LINE; do
             if [ $commit_ec -ne 0 ]; then
                 echo "Merge failed, $REMOTE_NAME $REMOTE_URL $REMOTE_BRANCH"
                 git merge --abort
-                exit $commit_ec
+                if [ $BYPASS -eq 1 ]; then
+                    is_conflict=1
+                else
+                    exit $commit_ec
+                fi
             fi
         else
 	    echo "Merge failed, manual merge"
@@ -663,7 +674,16 @@ while read LINE; do
         fi
     fi
 
-    MERGED=$((MERGED+1))
+    if echo "$MERGE_OUTPUT" | grep -q "Already up to date." ; then
+        echo "Nothing to merge: Already up to date."
+    elif [ $is_conflict != 1 ]; then
+        num_commits=$(git log --oneline --no-merges $TAG..$MERGER | wc -l)
+        echo "Merge successful : $REMOTE_NAME : $branch_tip : $num_commits"
+        MERGED=$((MERGED+1))
+    else
+        echo "Merge conflict : $REMOTE_NAME : $branch_tip"
+        CONFLICTED=$((CONFLICTED+1))
+    fi
 
 done < $CONFIG
 
