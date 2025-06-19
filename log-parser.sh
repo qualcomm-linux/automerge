@@ -1,5 +1,4 @@
 #!/bin/bash
-
 # Usage check
 if [ "$#" -ne 1 ]; then
     echo "Usage: $0 <logfile>"
@@ -16,17 +15,18 @@ CONFLICT_FILE="topic_conflict"
 > "$CONFLICT_FILE"
 
 # Write header
-printf "%-20s %*s\n" "Name" 20 "SHA" >> "$MERGED_FILE"
-printf "%s\n" "--------------------------------------------------------" >> "$MERGED_FILE"
+printf "%-20s %*s %*s\n" "Name" 20 "SHA" 40 "Commits">> "$MERGED_FILE"
+printf "%s\n" "------------------------------------------------------------------------------------" >> "$MERGED_FILE"
 printf "%-20s %*s\n" "Name" 20 "SHA" >> "$CONFLICT_FILE"
 printf "%s\n" "--------------------------------------------------------" >> "$CONFLICT_FILE"
 
 while read -r line; do
-  echo "$line" | grep -E "^Merge successful : .+ : [a-fA-F0-9]{7,40}$"
+  echo "$line" | grep -E "^Merge successful : .+ : [a-fA-F0-9]{7,40} : [0-9]+$"
   if [ $? -eq 0 ]; then
     branch=$(echo "$line" | cut -d':' -f2 | xargs)
     sha=$(echo "$line" | cut -d':' -f3 | xargs)
-    printf "%-20s %*s\n" "$branch" 45 "$sha" >> "$MERGED_FILE"
+    commits=$(echo "$line" | cut -d':' -f4 | xargs)
+    printf "%-20s %*s %10s\n" "$branch" 45 "$sha" "$commits">> "$MERGED_FILE"
   fi
 
   echo "$line" | grep -E "^Merge conflict : .+ : [a-fA-F0-9]{7,40}$"
