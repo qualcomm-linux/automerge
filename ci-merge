@@ -87,6 +87,9 @@ INTERACTIVE=0
 # Do not force merging of the branches if there were no changes
 FORCE=0
 
+# Pause on conflict and wait for user input [y=continue / n=abort], only use with INTERACTIVE=1
+PAUSE_ON_CONFLICT=0
+
 # The default repository directory is the current one
 LOCAL_REPO=$PWD
 
@@ -142,6 +145,7 @@ Help() {
     echo "	 -f|--config <name>	: Config file listing branches to be merged [$CONFIG]"
     echo "	 -n|--interactive	: Whether to run the tool interactively [$INTERACTIVE]"
     echo "	 -y|--force		: Whether to force merging the branches [$FORCE]"
+    echo "	 -p|--pause-on-conflict : Whether to pause on merge conflict while using interactive mode [$PAUSE_ON_CONFLICT]"
 
     echo
 }
@@ -152,8 +156,8 @@ Help() {
 #
 options_setup() {
 
-    SHORTOPT="hnl:r:b:i:t:c:f:y"
-    LONGOPT="help,interactive,local:,remote:,baseline:,integ:,track:,cache:,config:,force"
+    SHORTOPT="hnl:r:b:i:t:c:f:yp"
+    LONGOPT="help,interactive,local:,remote:,baseline:,integ:,track:,cache:,config:,force,pause-on-conflict"
 
     OPTS=$(getopt -o $SHORTOPT -l $LONGOPT -- "$@")
 
@@ -209,6 +213,10 @@ options_setup() {
 
 	    --force|-y)
 		FORCE=$1
+		;;
+
+	    --pause-on-conflict|-p)
+		PAUSE_ON_CONFLICT=1
 		;;
 
 	    --cache|-c)
@@ -658,8 +666,40 @@ while read LINE; do
             fi
         else
 	    echo "Merge failed, manual merge"
-	    git mergetool -y <&3 || exit
-	    git commit -a --no-edit
+            if [ $PAUSE_ON_CONFLICT -eq 0 ]; then
+	        git mergetool -y <&3 || exit
+	        git commit -a --no-edit
+	    else
+                echo ""
+                echo "----------------------------------------------------------------"
+                echo "|           *** MERGE CONFLICT — ACTION REQUIRED ***           |"
+                echo "|--------------------------------------------------------------|"
+                echo "|  Topic branch : $REMOTE_NAME/$REMOTE_BRANCH                  |"
+                echo "|  Remote URL   : $REMOTE_URL                                  |"
+                echo "|  Conflicting files:                                          |"
+                git diff --name-only --diff-filter=U | sed 's/^/║    • /'
+                echo "|--------------------------------------------------------------|"
+                echo "|  Resolve conflicts in a separate terminal, then:             |"
+                echo "|    y = conflicts resolved, continue integration              |"
+                echo "|    n = abort integration                                     |"
+                echo "----------------------------------------------------------------"
+                echo -n "Continue? [y/n]: "
+                read PAUSE_RES <&3
+                if [ "${PAUSE_RES,,}" = "y" ]; then
+                    echo "ℹ Committing resolved conflicts and continuing integration."
+                    git commit --no-edit
+                    commit_ec=$?
+                    if [ $commit_ec -ne 0 ]; then
+                        echo "✗ git commit failed after conflict resolution — unresolved markers remain?"
+                        git merge --abort
+                        exit $commit_ec
+                    fi
+                else
+                    echo "✗ Integration aborted by user at conflict in $REMOTE_NAME/$REMOTE_BRANCH."
+                    git merge --abort
+                    exit 1
+                fi
+	    fi
         fi
     fi
 
