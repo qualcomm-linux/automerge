@@ -111,6 +111,11 @@ RERERE_CACHE=""
 
 RERERE_CACHE_DIR=""
 
+# YAML topic configuration. When set, CONFIG is generated from this file and
+# contains: <name> <repo> <branch> <sha>.
+YAML_CONFIG=""
+CONFIG_IS_YAML=0
+
 BYPASS=0
 
 # Global variable to test if a change occured during the last merge
@@ -142,6 +147,7 @@ Help() {
     echo "	 -t|--track tag|head	: Changes on the latest tag or HEAD on branch [$TRACK]"
     echo "	 -c|--cache <name>	: URL to rerere cache repository [$RERERE_CACHE]"
     echo "	 -f|--config <name>	: Config file listing branches to be merged [$CONFIG]"
+    echo "	 -Y|--yaml-config <name>	: YAML topic file listing pinned SHAs to be merged [$YAML_CONFIG]"
     echo "	 -n|--interactive	: Whether to run the tool interactively [$INTERACTIVE]"
     echo "	 -y|--force		: Whether to force merging the branches [$FORCE]"
     echo "	 -p|--pass		: Whether to bypass conflicting branch [$BYPASS]"
@@ -155,8 +161,8 @@ Help() {
 #
 options_setup() {
 
-    SHORTOPT="hnl:r:b:i:t:c:f:yp"
-    LONGOPT="help,interactive,local:,remote:,baseline:,integ:,track:,cache:,config:,force,pass"
+    SHORTOPT="hnl:r:b:i:t:c:f:ypY:"
+    LONGOPT="help,interactive,local:,remote:,baseline:,integ:,track:,cache:,config:,yaml-config:,force,pass"
 
     OPTS=$(getopt -o $SHORTOPT -l $LONGOPT -- "$@")
 
@@ -220,6 +226,10 @@ options_setup() {
 
 	    --config|-f)
 		CONFIG=$1
+		;;
+
+	    --yaml-config|-Y)
+		YAML_CONFIG=$1
 		;;
 
         --pass|-p)
@@ -312,7 +322,131 @@ git_rerere_update() {
 #
 # Check we have a configuration file before continuing
 #
+parse_yaml_config() {
+    local yaml_config=$1
+
+    if [ ! -f "$yaml_config" ]; then
+	echo "YAML configuration file not found: $yaml_config"
+	exit 1
+    fi
+
+    awk '
+    function trim(value) {
+        sub(/^[[:space:]]+/, "", value)
+        sub(/[[:space:]]+$/, "", value)
+        return value
+    }
+
+    function clean_value(value) {
+        value = trim(value)
+        if (value == "null")
+            return ""
+        if (value ~ /^".*"$/ || value ~ /^'"'"'.*'"'"'$/) {
+            sub(/^./, "", value)
+            sub(/.$/, "", value)
+        }
+        return value
+    }
+
+    function get_value(line) {
+        sub(/^[^:]*:[[:space:]]*/, "", line)
+        return clean_value(line)
+    }
+
+    function emit_baseline() {
+        if (baseline_emitted)
+            return
+        if (baseline_repo == "" || baseline_branch == "" || baseline_sha == "") {
+            print "Invalid YAML baseline: repo, branch and sha are required" > "/dev/stderr"
+            exit 1
+        }
+        print "baseline\t" baseline_repo "\t" baseline_branch "\t" baseline_sha
+        baseline_emitted = 1
+    }
+
+    function emit_topic() {
+        if (name == "")
+            return
+        if (repo == "" || branch == "" || sha == "") {
+            printf "Invalid YAML topic '%s': name, repo, branch and sha are required\n", name > "/dev/stderr"
+            exit 1
+        }
+        print name "\t" repo "\t" branch "\t" sha
+        count++
+    }
+
+    /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
+
+    /^[[:space:]]*baseline:[[:space:]]*$/ {
+        section = "baseline"
+        next
+    }
+
+    /^[[:space:]]*topics:[[:space:]]*$/ {
+        emit_baseline()
+        section = "topics"
+        next
+    }
+
+    /^[[:space:]]*-[[:space:]]*name:[[:space:]]*/ {
+        if (section != "topics")
+            next
+        emit_topic()
+        line = $0
+        sub(/^[[:space:]]*-[[:space:]]*/, "", line)
+        name = get_value(line)
+        repo = branch = sha = ""
+        next
+    }
+
+    /^[[:space:]]*repo:[[:space:]]*/ {
+        if (section == "baseline")
+            baseline_repo = get_value($0)
+        else if (section == "topics")
+            repo = get_value($0)
+        next
+    }
+
+    /^[[:space:]]*branch:[[:space:]]*/ {
+        if (section == "baseline")
+            baseline_branch = get_value($0)
+        else if (section == "topics")
+            branch = get_value($0)
+        next
+    }
+
+    /^[[:space:]]*sha:[[:space:]]*/ {
+        if (section == "baseline")
+            baseline_sha = get_value($0)
+        else if (section == "topics")
+            sha = get_value($0)
+        next
+    }
+
+    END {
+        emit_baseline()
+        emit_topic()
+        if (count == 0) {
+            print "YAML configuration does not contain any topics" > "/dev/stderr"
+            exit 1
+        }
+    }
+    ' "$yaml_config"
+}
+
 config_setup() {
+
+    if [ -n "$YAML_CONFIG" -a -n "$CONFIG" ]; then
+	echo "Use either --config or --yaml-config, not both."
+	exit 1
+    fi
+
+    if [ -n "$YAML_CONFIG" ]; then
+	CONFIG=$(mktemp /tmp/ci-merge-yaml.XXXXXX)
+	parse_yaml_config "$YAML_CONFIG" > "$CONFIG" || exit 1
+	CONFIG_IS_YAML=1
+	return
+    fi
 
     # The configuration file containing the name + url + branch
     if [ -z "${CONFIG}" ]; then
@@ -353,6 +487,11 @@ baseline_branch_setup() {
 
 	    REMOTE_URL=$(git remote -v | grep "^$REMOTE_NAME\b" | grep fetch | awk '{ print $2 }')
 	    REMOTE_BRANCH=$(echo $LINE | awk '{print $3}')
+	    REMOTE_SHA=$(echo $LINE | awk '{print $4}')
+	    if [ $CONFIG_IS_YAML -eq 1 -a "$REMOTE_SHA" != "" ]; then
+		BASELINE_BRANCH=$REMOTE_SHA
+		break
+	    fi
 	    if [ "$REMOTE_BRANCH" != "" ]; then
 		BASELINE_BRANCH=remotes/$REMOTE_NAME/$REMOTE_BRANCH
 		break
@@ -503,6 +642,7 @@ do_add_new() {
 	REMOTE_NAME=$(echo $LINE | awk '{ print $1 }')
 	REMOTE_URL=$(echo $LINE | awk '{print $2}')
 	REMOTE_BRANCH=$(echo $LINE | awk '{print $3}')
+	REMOTE_SHA=$(echo $LINE | awk '{print $4}')
 
 	git remote | grep -q "^$REMOTE_NAME$"
 	if [ $? -ne 0 ]; then
@@ -552,6 +692,7 @@ do_update_remote() {
 	echo $LINE | egrep -q '(^#|^\s*$|^\s*\t*#)' && continue
 
 	REMOTE_NAME=$(echo $LINE | awk '{ print $1 }')
+	REMOTE_SHA=$(echo $LINE | awk '{ print $4 }')
 
 	if [ "$REMOTE_NAME" = "$BASELINE" ]; then
 		continue
@@ -559,8 +700,20 @@ do_update_remote() {
 
 	echo "Updating $REMOTE_NAME"
 
+	SHA_PRESENT=0
+	if [ -n "$REMOTE_SHA" ]; then
+	    git rev-parse --quiet --verify "$REMOTE_SHA^{commit}" > /dev/null
+	    SHA_PRESENT=$?
+	fi
+
 	RES=$(git remote update $REMOTE_NAME 2>&1 | wc -l)
-	if [ $RES -gt 1 ]; then
+	if [ -n "$REMOTE_SHA" ]; then
+	    git rev-parse --quiet --verify "$REMOTE_SHA^{commit}" > /dev/null
+	    if [ $SHA_PRESENT -ne 0 -a $? -eq 0 ]; then
+		echo "$REMOTE_NAME has fetched pinned SHA $REMOTE_SHA."
+		UPDATED=$((UPDATED + 1))
+	    fi
+	elif [ $RES -gt 1 ]; then
 	    echo "$REMOTE_NAME has changed."
 	    UPDATED=$((UPDATED + 1))
 	fi
@@ -615,7 +768,7 @@ git branch | grep -q "$INTEG_BRANCH$"
 if [ $? -eq 0 ]; then
 	echo "The integration branch ($INTEG_BRANCH) already exists."
 
-	INTEG_BRANCH_NEW_NAME=$INTEG_BRANCH-$(date +%Y%m%d-%H%M%S)-$(git describe)
+	INTEG_BRANCH_NEW_NAME=$INTEG_BRANCH-$(date +%Y%m%d-%H%M%S)-$(git describe 2>/dev/null || git rev-parse --short HEAD)
 
 	echo "Rename it to $INTEG_BRANCH_NEW_NAME"
 	git branch -M $INTEG_BRANCH $INTEG_BRANCH_NEW_NAME
@@ -637,13 +790,20 @@ while read LINE; do
     REMOTE_NAME=$(echo $LINE | awk '{ print $1 }')
     REMOTE_URL=$(echo $LINE | awk '{print $2}')
     REMOTE_BRANCH=$(echo $LINE | awk '{print $3}')
+    REMOTE_SHA=$(echo $LINE | awk '{print $4}')
 
     if [ "$REMOTE_NAME" = "$BASELINE" ]; then
 	continue
     fi
 
-    git rev-parse --quiet --verify "override/$REMOTE_NAME"
-    if [ $? -eq 0 ]; then
+    if [ -n "$REMOTE_SHA" ]; then
+        MERGER="$REMOTE_SHA"
+        git rev-parse --quiet --verify "$MERGER^{commit}" > /dev/null
+        if [ $? -ne 0 ]; then
+            git fetch $REMOTE_NAME $REMOTE_SHA
+        fi
+        git rev-parse --quiet --verify "$MERGER^{commit}" > /dev/null || exit 1
+    elif git rev-parse --quiet --verify "override/$REMOTE_NAME" > /dev/null; then
         MERGER="override/$REMOTE_NAME"
     else
         MERGER="$REMOTE_NAME/$REMOTE_BRANCH"
@@ -652,7 +812,11 @@ while read LINE; do
     echo "------------------------------------------"
     echo " ** Merging topic branch: $MERGER"
     branch_tip=$(git rev-parse $MERGER)
-    MERGE_OUTPUT=$(git merge --no-ff --no-edit -m "Merge remote-tracking branch $REMOTE_NAME into $INTEG_BRANCH" $MERGER)
+    if [ -n "$REMOTE_SHA" ]; then
+        MERGE_OUTPUT=$(git merge --no-ff --no-edit -m "Merge $REMOTE_NAME at $REMOTE_SHA into $INTEG_BRANCH" $MERGER)
+    else
+        MERGE_OUTPUT=$(git merge --no-ff --no-edit -m "Merge remote-tracking branch $REMOTE_NAME into $INTEG_BRANCH" $MERGER)
+    fi
     if [ $? -ne 0 ]; then
 	if [ $INTERACTIVE -eq 0 ]; then
             # try to commit, may be resolved by rerere

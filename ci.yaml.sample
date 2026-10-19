@@ -1,0 +1,49 @@
+#
+# Sample configuration for ci-merge -Y|--yaml-config.
+#
+# This is the YAML alternative to ci.conf. Where ci.conf merges whatever each
+# branch currently points at, this file pins an exact commit for the baseline
+# and for every topic, so the same file always produces the same tree.
+#
+# Use it with:
+#
+#   ci-merge -l $LOCAL_LINUX_REPO -c $RR_CACHE -Y ci.yaml
+#
+# Only the keys below are read. Anything else is ignored, so an unsupported
+# key will not do what you expect.
+#
+# A 'baseline' section and a 'topics' list are both mandatory.
+#
+# baseline requires:
+#   repo    git URL to clone the baseline from
+#   branch  branch the baseline lives on
+#   sha     exact commit to start the integration from
+#
+# Each topics entry requires:
+#   name    label for the topic, also used as the git remote name
+#   repo    git URL to fetch the topic from
+#   branch  branch the topic lives on
+#   sha     exact commit to merge
+#
+# The branch is only used to locate and fetch the work; the merge always uses
+# the pinned sha. Advancing a topic is therefore an explicit edit of its sha,
+# never a side effect of someone pushing to the branch.
+#
+# Values may be quoted or unquoted; surrounding quotes are stripped.
+#
+
+baseline:
+  repo: "https://github.com/qualcomm-linux/kernel.git"
+  branch: qcom-next-staging
+  sha: 93f51579e7df248780214094418f205253383cc5
+
+topics:
+  - name: tech/bsp/clk
+    repo: "https://github.com/qualcomm-linux/kernel-topics.git"
+    branch: tech/bsp/clk
+    sha: b6621533052784e753ea37738f720695d47222de
+
+  - name: tech/mm/drm
+    repo: "https://github.com/qualcomm-linux/kernel-topics.git"
+    branch: tech/mm/drm
+    sha: 56814926567d8bfce29ea9a7892be2455e74fdd2
