@@ -16,8 +16,11 @@
 #
 # baseline requires:
 #   repo    git URL to clone the baseline from
-#   branch  branch the baseline lives on
 #   sha     exact commit to start the integration from
+#   and one of:
+#     branch  branch the baseline lives on
+#     tag     tag the baseline lives on, for anchoring to a release point
+#             rather than a branch whose tip keeps moving
 #
 # Each topics entry requires:
 #   name    label for the topic, also used as the git remote name
@@ -36,6 +39,13 @@ baseline:
   repo: "https://github.com/qualcomm-linux/kernel.git"
   branch: qcom-next-staging
   sha: 93f51579e7df248780214094418f205253383cc5
+
+# Anchored to a release point instead of a branch:
+#
+# baseline:
+#   repo: "https://github.com/qualcomm-linux/kernel.git"
+#   tag: v7.4-rc1
+#   sha: 6628e7d4c6b25c8d18f1345e3a20d21829aae7e4
 
 topics:
   - name: tech/bsp/clk

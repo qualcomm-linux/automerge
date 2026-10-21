@@ -112,7 +112,7 @@ RERERE_CACHE=""
 RERERE_CACHE_DIR=""
 
 # YAML topic configuration. When set, CONFIG is generated from this file and
-# contains: <name> <repo> <branch> <sha>.
+# contains: <name> <repo> <branch-or-tag> <sha> [tag].
 YAML_CONFIG=""
 CONFIG_IS_YAML=0
 
@@ -356,11 +356,14 @@ parse_yaml_config() {
     function emit_baseline() {
         if (baseline_emitted)
             return
-        if (baseline_repo == "" || baseline_branch == "" || baseline_sha == "") {
-            print "Invalid YAML baseline: repo, branch and sha are required" > "/dev/stderr"
+        if (baseline_repo == "" || (baseline_branch == "" && baseline_tag == "") || baseline_sha == "") {
+            print "Invalid YAML baseline: repo, branch or tag, and sha are required" > "/dev/stderr"
             exit 1
         }
-        print "baseline\t" baseline_repo "\t" baseline_branch "\t" baseline_sha
+        if (baseline_tag != "")
+            print "baseline\t" baseline_repo "\t" baseline_tag "\t" baseline_sha "\ttag"
+        else
+            print "baseline\t" baseline_repo "\t" baseline_branch "\t" baseline_sha
         baseline_emitted = 1
     }
 
@@ -412,6 +415,12 @@ parse_yaml_config() {
             baseline_branch = get_value($0)
         else if (section == "topics")
             branch = get_value($0)
+        next
+    }
+
+    /^[[:space:]]*tag:[[:space:]]*/ {
+        if (section == "baseline")
+            baseline_tag = get_value($0)
         next
     }
 
@@ -643,11 +652,17 @@ do_add_new() {
 	REMOTE_URL=$(echo $LINE | awk '{print $2}')
 	REMOTE_BRANCH=$(echo $LINE | awk '{print $3}')
 	REMOTE_SHA=$(echo $LINE | awk '{print $4}')
+	REMOTE_KIND=$(echo $LINE | awk '{print $5}')
 
 	git remote | grep -q "^$REMOTE_NAME$"
 	if [ $? -ne 0 ]; then
 	    echo "Adding remote $REMOTE_NAME $REMOTE_URL $REMOTE_BRANCH"
-	    git remote add -f -t $REMOTE_BRANCH $REMOTE_NAME $REMOTE_URL
+	    if [ "$REMOTE_KIND" = "tag" ]; then
+		git remote add $REMOTE_NAME $REMOTE_URL
+		git fetch $REMOTE_NAME "refs/tags/$REMOTE_BRANCH:refs/tags/$REMOTE_BRANCH"
+	    else
+		git remote add -f -t $REMOTE_BRANCH $REMOTE_NAME $REMOTE_URL
+	    fi
 	    ADDED=$((ADDED + 1))
 	fi
     done < $CONFIG
@@ -661,11 +676,21 @@ do_add_new() {
 
 do_update_baseline() {
 
+    BASELINE_REF=$(grep "^$BASELINE\b" $CONFIG | awk '{print $3; exit}')
+    BASELINE_KIND=$(grep "^$BASELINE\b" $CONFIG | awk '{print $5; exit}')
+    if [ "$BASELINE_KIND" = "tag" ]; then
+	git fetch $BASELINE "refs/tags/$BASELINE_REF:refs/tags/$BASELINE_REF" 2>&1
+    fi
+
     ID1=$(get_last_change_id)
 
     echo "Updating $BASELINE ..."
 
-    git remote update $BASELINE 2>&1
+    if [ "$BASELINE_KIND" = "tag" ]; then
+	git fetch $BASELINE "refs/tags/$BASELINE_REF:refs/tags/$BASELINE_REF" 2>&1
+    else
+	git remote update $BASELINE 2>&1
+    fi
 
     ID2=$(get_last_change_id)
 

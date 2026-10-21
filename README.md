@@ -31,7 +31,7 @@ $ Setup a config file.
 
   baseline:
     repo: "https://github.com/qualcomm-linux/kernel.git"
-    branch: qcom-next-staging
+    branch: qcom-next-staging  # or tag: v7.3-rc4
     sha: 93f51579e7df248780214094418f205253383cc5
 
   topics:
