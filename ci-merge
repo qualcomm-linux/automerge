@@ -680,6 +680,9 @@ do_update_baseline() {
     BASELINE_KIND=$(grep "^$BASELINE\b" $CONFIG | awk '{print $5; exit}')
     if [ "$BASELINE_KIND" = "tag" ]; then
 	git fetch $BASELINE "refs/tags/$BASELINE_REF:refs/tags/$BASELINE_REF" 2>&1
+        if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+            git fetch --unshallow $BASELINE 2>&1 || git fetch --deepen=100000 $BASELINE 2>&1
+        fi
     fi
 
     ID1=$(get_last_change_id)
@@ -688,6 +691,9 @@ do_update_baseline() {
 
     if [ "$BASELINE_KIND" = "tag" ]; then
 	git fetch $BASELINE "refs/tags/$BASELINE_REF:refs/tags/$BASELINE_REF" 2>&1
+        if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+            git fetch --unshallow $BASELINE 2>&1 || git fetch --deepen=100000 $BASELINE 2>&1
+        fi
     else
 	git remote update $BASELINE 2>&1
     fi
@@ -857,9 +863,13 @@ while read LINE; do
                 fi
             fi
         else
+	    if ! git rev-parse --quiet --verify MERGE_HEAD > /dev/null; then
+	        echo "Merge failed before creating MERGE_HEAD; not a resolvable content conflict"
+	        exit 1
+	    fi
 	    echo "Merge failed, manual merge"
 	    git mergetool -y <&3 || exit
-	    git commit -a --no-edit
+	    git commit -a --no-edit || exit
         fi
     fi
 
