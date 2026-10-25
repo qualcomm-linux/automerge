@@ -26,8 +26,9 @@ $ Setup a config file.
   option
 
   Alternatively, pass a YAML file with --yaml-config. The baseline and topics
-  are fetched from their configured branches but merged at the pinned sha
-  instead of the branch tip:
+  are fetched from their configured branches. Topics with a tag are
+  merged by tag name and the pinned sha is used to verify the tag target;
+  topics without a tag are merged at the pinned sha instead of the branch tip:
 
   baseline:
     repo: "https://github.com/qualcomm-linux/kernel.git"
@@ -39,6 +40,7 @@ $ Setup a config file.
       repo: "https://github.com/qualcomm-linux/kernel-topics.git"
       branch: tech/bsp/clk
       sha: b6621533052784e753ea37738f720695d47222de
+      tag: tech/bsp/clk-7.3-rc1-20261024
 
 $ export LOCAL_LINUX_REPO=~/work/sources/linux-ci.git
 $ export RR_CACHE=ssh://git@git.linaro.org/landing-teams/working/qualcomm/automerge-rrcache.git

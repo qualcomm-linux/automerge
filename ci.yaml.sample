@@ -28,11 +28,22 @@
 #   branch  branch the topic lives on
 #   sha     exact commit to merge
 #
-# The branch is only used to locate and fetch the work; the merge always uses
-# the pinned sha. Advancing a topic is therefore an explicit edit of its sha,
-# never a side effect of someone pushing to the branch.
+# and may also carry:
+#   tag     published tag to merge instead of the bare sha
 #
-# Values may be quoted or unquoted; surrounding quotes are stripped.
+# Without a tag, the branch is only used to locate and fetch the work and the
+# merge uses the pinned sha. With a tag, the tag is merged and named in the
+# merge commit, so the integrated history records which released version of
+# the topic went in rather than an opaque commit id. The sha is still
+# required and is checked against the tag: if the tag does not resolve to it
+# the run aborts, which catches a tag that has been moved or recreated
+# instead of silently integrating different code.
+#
+# Either way, advancing a topic is an explicit edit of this file, never a
+# side effect of someone pushing to the branch.
+#
+# Values may be quoted or unquoted; surrounding quotes are stripped. Leave the
+# tag key out altogether for a topic that should be merged at its sha.
 #
 
 baseline:
@@ -48,11 +59,14 @@ baseline:
 #   sha: 6628e7d4c6b25c8d18f1345e3a20d21829aae7e4
 
 topics:
+  # Merged by tag; the sha guards against the tag having moved.
   - name: tech/bsp/clk
     repo: "https://github.com/qualcomm-linux/kernel-topics.git"
     branch: tech/bsp/clk
     sha: b6621533052784e753ea37738f720695d47222de
+    tag: tech/bsp/clk-7.3-rc1-20261024
 
+  # No tag key, so merged at the pinned sha.
   - name: tech/mm/drm
     repo: "https://github.com/qualcomm-linux/kernel-topics.git"
     branch: tech/mm/drm

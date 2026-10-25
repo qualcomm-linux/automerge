@@ -112,7 +112,8 @@ RERERE_CACHE=""
 RERERE_CACHE_DIR=""
 
 # YAML topic configuration. When set, CONFIG is generated from this file and
-# contains: <name> <repo> <branch-or-tag> <sha> [tag].
+# contains: <name> <repo> <branch-or-tag> <sha> [tag]. If a topic tag is
+# present, the tag is fetched and merged while the SHA is used as a guard.
 YAML_CONFIG=""
 CONFIG_IS_YAML=0
 
@@ -374,7 +375,10 @@ parse_yaml_config() {
             printf "Invalid YAML topic '%s': name, repo, branch and sha are required\n", name > "/dev/stderr"
             exit 1
         }
-        print name "\t" repo "\t" branch "\t" sha
+        if (tag != "")
+            print name "\t" repo "\t" tag "\t" sha "\ttag"
+        else
+            print name "\t" repo "\t" branch "\t" sha
         count++
     }
 
@@ -398,7 +402,7 @@ parse_yaml_config() {
         line = $0
         sub(/^[[:space:]]*-[[:space:]]*/, "", line)
         name = get_value(line)
-        repo = branch = sha = ""
+        repo = branch = sha = tag = ""
         next
     }
 
@@ -421,6 +425,8 @@ parse_yaml_config() {
     /^[[:space:]]*tag:[[:space:]]*/ {
         if (section == "baseline")
             baseline_tag = get_value($0)
+        else if (section == "topics")
+            tag = get_value($0)
         next
     }
 
@@ -724,12 +730,33 @@ do_update_remote() {
 
 	REMOTE_NAME=$(echo $LINE | awk '{ print $1 }')
 	REMOTE_SHA=$(echo $LINE | awk '{ print $4 }')
+	REMOTE_REF=$(echo $LINE | awk '{ print $3 }')
+	REMOTE_KIND=$(echo $LINE | awk '{ print $5 }')
 
 	if [ "$REMOTE_NAME" = "$BASELINE" ]; then
 		continue
 	fi
 
 	echo "Updating $REMOTE_NAME"
+
+	if [ "$REMOTE_KIND" = "tag" ]; then
+	    OLD_TAG_SHA=$(git rev-parse --quiet --verify "refs/tags/$REMOTE_REF^{commit}" 2>/dev/null || true)
+	    git fetch $REMOTE_NAME "refs/tags/$REMOTE_REF:refs/tags/$REMOTE_REF" 2>&1
+	    NEW_TAG_SHA=$(git rev-parse --quiet --verify "refs/tags/$REMOTE_REF^{commit}" 2>/dev/null || true)
+	    if [ -z "$NEW_TAG_SHA" ]; then
+		echo "ERROR: failed to fetch tag $REMOTE_REF for $REMOTE_NAME"
+		exit 1
+	    fi
+	    if [ -n "$REMOTE_SHA" -a "$NEW_TAG_SHA" != "$REMOTE_SHA" ]; then
+		echo "ERROR: tag $REMOTE_REF for $REMOTE_NAME resolves to $NEW_TAG_SHA, expected $REMOTE_SHA"
+		exit 1
+	    fi
+	    if [ "$OLD_TAG_SHA" != "$NEW_TAG_SHA" ]; then
+		echo "$REMOTE_NAME has fetched tag $REMOTE_REF at $NEW_TAG_SHA."
+		UPDATED=$((UPDATED + 1))
+	    fi
+	    continue
+	fi
 
 	SHA_PRESENT=0
 	if [ -n "$REMOTE_SHA" ]; then
@@ -822,12 +849,24 @@ while read LINE; do
     REMOTE_URL=$(echo $LINE | awk '{print $2}')
     REMOTE_BRANCH=$(echo $LINE | awk '{print $3}')
     REMOTE_SHA=$(echo $LINE | awk '{print $4}')
+    REMOTE_KIND=$(echo $LINE | awk '{print $5}')
 
     if [ "$REMOTE_NAME" = "$BASELINE" ]; then
 	continue
     fi
 
-    if [ -n "$REMOTE_SHA" ]; then
+    if [ "$REMOTE_KIND" = "tag" ]; then
+        MERGER="refs/tags/$REMOTE_BRANCH"
+        git fetch $REMOTE_NAME "refs/tags/$REMOTE_BRANCH:refs/tags/$REMOTE_BRANCH"
+        git rev-parse --quiet --verify "$MERGER^{commit}" > /dev/null || exit 1
+        if [ -n "$REMOTE_SHA" ]; then
+            TAG_SHA=$(git rev-parse "$MERGER^{commit}")
+            if [ "$TAG_SHA" != "$REMOTE_SHA" ]; then
+                echo "ERROR: tag $REMOTE_BRANCH for $REMOTE_NAME resolves to $TAG_SHA, expected $REMOTE_SHA"
+                exit 1
+            fi
+        fi
+    elif [ -n "$REMOTE_SHA" ]; then
         MERGER="$REMOTE_SHA"
         git rev-parse --quiet --verify "$MERGER^{commit}" > /dev/null
         if [ $? -ne 0 ]; then
@@ -843,7 +882,9 @@ while read LINE; do
     echo "------------------------------------------"
     echo " ** Merging topic branch: $MERGER"
     branch_tip=$(git rev-parse $MERGER)
-    if [ -n "$REMOTE_SHA" ]; then
+    if [ "$REMOTE_KIND" = "tag" ]; then
+        MERGE_OUTPUT=$(git merge --no-ff --no-edit -m "Merge $REMOTE_NAME tag $REMOTE_BRANCH into $INTEG_BRANCH" $MERGER)
+    elif [ -n "$REMOTE_SHA" ]; then
         MERGE_OUTPUT=$(git merge --no-ff --no-edit -m "Merge $REMOTE_NAME at $REMOTE_SHA into $INTEG_BRANCH" $MERGER)
     else
         MERGE_OUTPUT=$(git merge --no-ff --no-edit -m "Merge remote-tracking branch $REMOTE_NAME into $INTEG_BRANCH" $MERGER)
