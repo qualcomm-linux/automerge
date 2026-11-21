@@ -25,11 +25,29 @@ $ Setup a config file.
   $HOME/.automerge/config, or point to an existing with using --config/-f
   option
 
+  Alternatively, pass a YAML file with --yaml-config. The baseline and topics
+  are fetched from their configured branches. Topics with a tag are
+  merged by tag name and the pinned sha is used to verify the tag target;
+  topics without a tag are merged at the pinned sha instead of the branch tip:
+
+  baseline:
+    repo: "https://github.com/qualcomm-linux/kernel.git"
+    branch: qcom-next-staging  # or tag: v7.3-rc4
+    sha: 93f51579e7df248780214094418f205253383cc5
+
+  topics:
+    - name: tech/bsp/clk
+      repo: "https://github.com/qualcomm-linux/kernel-topics.git"
+      branch: tech/bsp/clk
+      sha: b6621533052784e753ea37738f720695d47222de
+      tag: tech/bsp/clk-7.3-rc1-20261024
+
 $ export LOCAL_LINUX_REPO=~/work/sources/linux-ci.git
 $ export RR_CACHE=ssh://git@git.linaro.org/landing-teams/working/qualcomm/automerge-rrcache.git
 
 (Interactive run)
 $ ci-merge -l $LOCAL_LINUX_REPO -c $RR_CACHE -f ~/.automerge/automerge-ci.conf -n
+$ ci-merge -l $LOCAL_LINUX_REPO -c $RR_CACHE --yaml-config ~/.automerge/topics.yml -n
 
 ## Conflict Resolution and sharing a rerere cache within a team
 

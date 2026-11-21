@@ -1,0 +1,73 @@
+#
+# Sample configuration for ci-merge -Y|--yaml-config.
+#
+# This is the YAML alternative to ci.conf. Where ci.conf merges whatever each
+# branch currently points at, this file pins an exact commit for the baseline
+# and for every topic, so the same file always produces the same tree.
+#
+# Use it with:
+#
+#   ci-merge -l $LOCAL_LINUX_REPO -c $RR_CACHE -Y ci.yaml
+#
+# Only the keys below are read. Anything else is ignored, so an unsupported
+# key will not do what you expect.
+#
+# A 'baseline' section and a 'topics' list are both mandatory.
+#
+# baseline requires:
+#   repo    git URL to clone the baseline from
+#   sha     exact commit to start the integration from
+#   and one of:
+#     branch  branch the baseline lives on
+#     tag     tag the baseline lives on, for anchoring to a release point
+#             rather than a branch whose tip keeps moving
+#
+# Each topics entry requires:
+#   name    label for the topic, also used as the git remote name
+#   repo    git URL to fetch the topic from
+#   branch  branch the topic lives on
+#   sha     exact commit to merge
+#
+# and may also carry:
+#   tag     published tag to merge instead of the bare sha
+#
+# Without a tag, the branch is only used to locate and fetch the work and the
+# merge uses the pinned sha. With a tag, the tag is merged and named in the
+# merge commit, so the integrated history records which released version of
+# the topic went in rather than an opaque commit id. The sha is still
+# required and is checked against the tag: if the tag does not resolve to it
+# the run aborts, which catches a tag that has been moved or recreated
+# instead of silently integrating different code.
+#
+# Either way, advancing a topic is an explicit edit of this file, never a
+# side effect of someone pushing to the branch.
+#
+# Values may be quoted or unquoted; surrounding quotes are stripped. Leave the
+# tag key out altogether for a topic that should be merged at its sha.
+#
+
+baseline:
+  repo: "https://github.com/qualcomm-linux/kernel.git"
+  branch: qcom-next-staging
+  sha: 93f51579e7df248780214094418f205253383cc5
+
+# Anchored to a release point instead of a branch:
+#
+# baseline:
+#   repo: "https://github.com/qualcomm-linux/kernel.git"
+#   tag: v7.4-rc1
+#   sha: 6628e7d4c6b25c8d18f1345e3a20d21829aae7e4
+
+topics:
+  # Merged by tag; the sha guards against the tag having moved.
+  - name: tech/bsp/clk
+    repo: "https://github.com/qualcomm-linux/kernel-topics.git"
+    branch: tech/bsp/clk
+    sha: b6621533052784e753ea37738f720695d47222de
+    tag: tech/bsp/clk-7.3-rc1-20261024
+
+  # No tag key, so merged at the pinned sha.
+  - name: tech/mm/drm
+    repo: "https://github.com/qualcomm-linux/kernel-topics.git"
+    branch: tech/mm/drm
+    sha: 56814926567d8bfce29ea9a7892be2455e74fdd2
